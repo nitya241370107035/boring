@@ -1,0 +1,66 @@
+203.0.113.5 - - [10/Oct/2026:13:55:36 +0000] "GET /index.html HTTP/1.1" 200 2326 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+203.0.113.5 - - [10/Oct/2026:13:55:37 +0000] "GET /css/styles.css HTTP/1.1" 200 1045 "http://example.com/index.html" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+203.0.113.5 - - [10/Oct/2026:13:55:38 +0000] "GET /js/app.js HTTP/1.1" 200 4521 "http://example.com/index.html" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+203.0.113.5 - - [10/Oct/2026:13:55:40 +0000] "GET /images/logo.png HTTP/1.1" 200 12560 "http://example.com/index.html" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+203.0.113.6 - - [10/Oct/2026:13:55:45 +0000] "GET /about.html HTTP/1.1" 200 3120 "http://example.com/" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+203.0.113.6 - - [10/Oct/2026:13:55:50 +0000] "GET /contact.html HTTP/1.1" 200 2150 "http://example.com/about.html" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+203.0.113.6 - - [10/Oct/2026:13:55:55 +0000] "POST /api/contact HTTP/1.1" 200 45 "http://example.com/contact.html" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+
+# Benign search query trap: union station (MUST NOT trigger SQLi)
+203.0.113.9 - - [10/Oct/2026:13:56:00 +0000] "GET /search?q=union+station HTTP/1.1" 200 4096 "http://example.com/search" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+203.0.113.9 - - [10/Oct/2026:13:56:05 +0000] "GET /search?q=select+shoes HTTP/1.1" 200 3820 "http://example.com/search" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+
+# SQL Injection attacks
+198.51.100.7 - - [10/Oct/2026:13:56:10 +0000] "GET /products.php?id=1%27%20OR%201%3D1-- HTTP/1.1" 200 512 "-" "sqlmap/1.7"
+198.51.100.7 - - [10/Oct/2026:13:56:12 +0000] "GET /products.php?id=1%20UNION%20SELECT%20null,username,password%20FROM%20users-- HTTP/1.1" 200 1024 "-" "sqlmap/1.7"
+198.51.100.7 - - [10/Oct/2026:13:56:15 +0000] "GET /products.php?id=1%27%20AND%20sleep(5)-- HTTP/1.1" 200 128 "-" "sqlmap/1.7"
+198.51.100.7 - - [10/Oct/2026:13:56:18 +0000] "GET /products.php?id=1%27%20UNION%20SELECT%20table_name,column_name%20FROM%20information_schema.columns-- HTTP/1.1" 200 4096 "-" "sqlmap/1.7"
+
+# Path Traversal attacks
+198.51.100.12 - - [10/Oct/2026:13:56:25 +0000] "GET /../../etc/passwd HTTP/1.1" 404 196 "-" "Mozilla/5.0"
+198.51.100.12 - - [10/Oct/2026:13:56:28 +0000] "GET /static/%2e%2e/%2e%2e/windows/win.ini HTTP/1.1" 404 196 "-" "Mozilla/5.0"
+198.51.100.12 - - [10/Oct/2026:13:56:30 +0000] "GET /download?file=..%2f..%2fboot.ini HTTP/1.1" 404 196 "-" "Mozilla/5.0"
+
+# Cross-Site Scripting (XSS)
+198.51.100.15 - - [10/Oct/2026:13:56:35 +0000] "GET /comment?msg=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E HTTP/1.1" 200 1520 "-" "Mozilla/5.0"
+198.51.100.15 - - [10/Oct/2026:13:56:38 +0000] "GET /search?q=%3Csvg%2Fonload%3Dalert(1)%3E HTTP/1.1" 200 1520 "-" "Mozilla/5.0"
+198.51.100.15 - - [10/Oct/2026:13:56:40 +0000] "GET /index.php?param=javascript:alert(1) HTTP/1.1" 200 1410 "-" "Mozilla/5.0"
+
+# Command Injection
+198.51.100.20 - - [10/Oct/2026:13:56:45 +0000] "GET /tools/ping.php?ip=127.0.0.1%3B%20cat%20%2Fetc%2Fpasswd HTTP/1.1" 200 280 "-" "curl/7.88.1"
+198.51.100.20 - - [10/Oct/2026:13:56:48 +0000] "GET /tools/ping.php?ip=127.0.0.1%7C%20whoami HTTP/1.1" 200 140 "-" "curl/7.88.1"
+
+# Automated Scanning & Directory Brute-Force (Nikto / Gobuster)
+198.51.100.33 - - [10/Oct/2026:13:56:50 +0000] "GET /.env HTTP/1.1" 404 196 "-" "Nikto/2.1.6"
+198.51.100.33 - - [10/Oct/2026:13:56:51 +0000] "GET /.git/config HTTP/1.1" 404 196 "-" "Nikto/2.1.6"
+198.51.100.33 - - [10/Oct/2026:13:56:52 +0000] "GET /wp-config.php HTTP/1.1" 404 196 "-" "Nikto/2.1.6"
+198.51.100.33 - - [10/Oct/2026:13:56:53 +0000] "GET /phpmyadmin HTTP/1.1" 404 196 "-" "Nikto/2.1.6"
+198.51.100.33 - - [10/Oct/2026:13:56:54 +0000] "GET /server-status HTTP/1.1" 403 210 "-" "Nikto/2.1.6"
+198.51.100.33 - - [10/Oct/2026:13:56:55 +0000] "GET /backup.zip HTTP/1.1" 404 196 "-" "gobuster/3.5"
+198.51.100.33 - - [10/Oct/2026:13:56:56 +0000] "GET /admin.php HTTP/1.1" 404 196 "-" "gobuster/3.5"
+
+# Credential Brute-Force Burst (12 consecutive POSTs to /login in 25 seconds)
+192.0.2.44 - - [10/Oct/2026:13:57:01 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:03 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:05 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:07 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:09 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:11 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:13 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:15 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:17 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:19 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:21 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+192.0.2.44 - - [10/Oct/2026:13:57:23 +0000] "POST /login HTTP/1.1" 401 128 "http://example.com/login" "python-requests/2.31"
+
+# Edge cases: IPv6, Missing referrers, empty UA, dash bytes
+2001:db8::1 - - [10/Oct/2026:13:57:30 +0000] "GET /ipv6-test HTTP/1.1" 200 - "-" "-"
+203.0.113.50 - - [10/Oct/2026:13:57:35 +0000] "GET /status HTTP/1.0" 200 45 "-" ""
+203.0.113.51 - - [10/Oct/2026:13:57:40 +0000] "HEAD /health HTTP/1.1" 200 0 "-" "curl/8.4.0"
+
+# Double-encoded payload (%2527 -> %27 -> ')
+198.51.100.99 - - [10/Oct/2026:13:57:45 +0000] "GET /items.php?cat=shoes%2527%20OR%201%3D1-- HTTP/1.1" 200 890 "-" "Mozilla/5.0"
+
+# Deliberately malformed lines for parser reject testing
+INVALID LINE WITHOUT HTTP PROTOCOL OR STATUS
+corrupted line with random binary \x00\x01\x02 characters

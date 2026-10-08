@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-10-08T08:03:52.418993+00:00",
+  "input_logfile": "D:\\pds_final\\tests\\fixtures\\sample_access.log",
+  "output_parquet": "D:\\pds_final\\data\\processed\\pipeline_out.parquet",
+  "duration_seconds": 0.041,
+  "total_parsed_rows": 44,
+  "total_rejects": 2,
+  "total_attacks": 32,
+  "attack_distribution": {
+    "benign": 12,
+    "brute_force": 12,
+    "sensitive_probe": 6,
+    "sqli": 5,
+    "xss": 3,
+    "path_traversal": 3,
+    "cmd_injection": 2,
+    "scanner": 1
+  }
+}

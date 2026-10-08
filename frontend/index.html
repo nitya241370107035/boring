@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SentinelLog | Enterprise SOC · SIEM · Threat Detection Platform</title>
+  <meta name="description" content="Production-grade Hybrid SIEM, ML-powered Threat Detection & Endpoint Telemetry Platform — GTU Practical Data Science BE05000231">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header>
+  <div class="brand">
+    <div class="brand-icon">🛡</div>
+    <div class="brand-text">
+      <h1>SENTINEL<span>LOG</span></h1>
+      <p>HYBRID SIEM &amp; ML THREAT DETECTION · v1.0</p>
+    </div>
+  </div>
+
+  <nav class="nav-links">
+    <button class="nav-btn active" data-tab="overview"    id="nav-overview">📊 Overview</button>
+    <button class="nav-btn"        data-tab="alerts"      id="nav-alerts">🚨 Alerts <span id="nav-alert-count" class="badge crit" style="margin-left:4px;font-size:0.62rem;">0</span></button>
+    <button class="nav-btn"        data-tab="sandbox"     id="nav-sandbox">🧪 ML Sandbox</button>
+    <button class="nav-btn"        data-tab="hosts"       id="nav-hosts">💻 Endpoints</button>
+    <button class="nav-btn"        data-tab="events"      id="nav-events">📜 Event Stream</button>
+    <button class="nav-btn"        data-tab="agent"       id="nav-agent">🤖 Agent Log</button>
+    <button class="nav-btn"        data-tab="benchmarks"  id="nav-benchmarks">📈 Dataset</button>
+  </nav>
+
+  <div class="status-badge" id="status-badge">
+    <div class="pulse-dot" id="api-pulse"></div>
+    <span id="api-status-text">CONNECTING</span>
+    <span id="server-clock" style="color:var(--text-muted);margin-left:0.25rem;font-size:0.68rem;"></span>
+  </div>
+</header>
+
+<!-- ═══════════ MAIN ═══════════ -->
+<main>
+
+  <!-- ──────────── TAB: OVERVIEW ──────────── -->
+  <section id="tab-overview" class="tab-content active">
+
+    <!-- KPI Cards -->
+    <div class="metrics-grid">
+      <div class="glass metric-card cyan">
+        <div class="card-stripe"></div>
+        <div class="metric-icon">📥</div>
+        <div class="metric-title">Total Ingested Events</div>
+        <div class="metric-value cyan-val" id="kpi-events">—</div>
+        <div class="metric-sub">Web logs &amp; endpoint telemetry</div>
+      </div>
+      <div class="glass metric-card rose">
+        <div class="card-stripe"></div>
+        <div class="metric-icon">🚨</div>
+        <div class="metric-title">Active Security Alerts</div>
+        <div class="metric-value rose-val" id="kpi-alerts">—</div>
+        <div class="metric-sub">Calibrated threat score ≥ 60</div>
+      </div>
+      <div class="glass metric-card emerald">
+        <div class="card-stripe"></div>
+        <div class="metric-icon">🖥</div>
+        <div class="metric-title">Monitored Endpoints</div>
+        <div class="metric-value green-val" id="kpi-hosts">—</div>
+        <div class="metric-sub">Agents heartbeating via API</div>
+      </div>
+      <div class="glass metric-card purple">
+        <div class="card-stripe"></div>
+        <div class="metric-icon">🧠</div>
+        <div class="metric-title">Training Dataset</div>
+        <div class="metric-value purple-val">1M</div>
+        <div class="metric-sub">Balanced 7-class · 1,000,000 rows</div>
+      </div>
+    </div>
+
+    <!-- Live agent ticker -->
+    <div class="live-ticker glass">
+      <div class="live-ticker-dot"></div>
+      <span class="live-ticker-badge">LIVE</span>
+      <div id="agent-ticker" style="flex:1; overflow:hidden; font-family:var(--font-mono); font-size:0.79rem;">
+        <span style="color:var(--text-muted);">Initializing SOC telemetry feed…</span>
+      </div>
+    </div>
+
+    <!-- Simulator -->
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>⚡ Live Attack Simulator <span class="head-accent">sends to live API</span></h3>
+        <span style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">Click any vector → real payload ingest → ML scoring</span>
+      </div>
+      <div class="sim-grid">
+        <button class="sim-btn" onclick="simulateAttack('sqli')" id="sim-sqli">
+          <span class="sim-icon">💉</span>
+          <span class="sim-title">SQL Injection</span>
+          <span class="sim-desc">UNION SELECT / OR 1=1</span>
+        </button>
+        <button class="sim-btn" onclick="simulateAttack('xss')" id="sim-xss">
+          <span class="sim-icon">⚡</span>
+          <span class="sim-title">XSS Attack</span>
+          <span class="sim-desc">&lt;script&gt;alert(cookie)&lt;/script&gt;</span>
+        </button>
+        <button class="sim-btn" onclick="simulateAttack('traversal')" id="sim-traversal">
+          <span class="sim-icon">📁</span>
+          <span class="sim-title">Path Traversal</span>
+          <span class="sim-desc">../../../../etc/passwd</span>
+        </button>
+        <button class="sim-btn" onclick="simulateAttack('powershell')" id="sim-ps">
+          <span class="sim-icon">💻</span>
+          <span class="sim-title">Encoded PowerShell</span>
+          <span class="sim-desc">MITRE T1059.001 Base64</span>
+        </button>
+        <button class="sim-btn" onclick="simulateAttack('brute')" id="sim-brute">
+          <span class="sim-icon">🔑</span>
+          <span class="sim-title">Brute Force</span>
+          <span class="sim-desc">8× rapid failed logons</span>
+        </button>
+        <button class="sim-btn" onclick="simulateAttack('churn')" id="sim-churn">
+          <span class="sim-icon">🔒</span>
+          <span class="sim-title">File Churn</span>
+          <span class="sim-desc">Ransomware indicator</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Recent Alerts -->
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>🚨 Active Threat Feed <span class="head-accent">auto-refresh 3s</span></h3>
+        <button class="action-btn primary" onclick="fetchAlerts('open')">↻ Refresh</button>
+      </div>
+      <div class="alerts-list" id="overview-alerts-list">
+        <div style="padding:2rem; text-align:center; color:var(--text-muted);">Loading alerts from API…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: ALERTS TRIAGE ──────────── -->
+  <section id="tab-alerts" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>🚨 SOC Analyst Alert Triage</h3>
+        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+          <button class="action-btn primary" onclick="fetchAlerts('open')"         id="filter-open">Open</button>
+          <button class="action-btn"         onclick="fetchAlerts('all')"          id="filter-all">All</button>
+          <button class="action-btn"         onclick="fetchAlerts('acknowledged')" id="filter-ack">Acknowledged</button>
+          <button class="action-btn"         onclick="fetchAlerts('false_positive')" id="filter-fp">False Positives</button>
+        </div>
+      </div>
+      <div class="alerts-list" id="triage-alerts-list" style="max-height:700px;"></div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: ML SANDBOX ──────────── -->
+  <section id="tab-sandbox" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>🧪 Real-Time ML Threat Sandbox</h3>
+      </div>
+      <p style="color:var(--text-secondary); font-size:0.83rem; margin-bottom:1.25rem; line-height:1.6;">
+        Analyze any HTTP request through full feature extraction → Random Forest classifier → Isolation Forest anomaly engine → calibrated composite scoring.
+      </p>
+
+      <div class="sandbox-input-group">
+        <input type="text" id="sandbox-url-input" class="sandbox-input"
+               placeholder="/search.php?id=1' UNION SELECT username,password FROM users--">
+        <button class="sandbox-submit" onclick="runSandboxAnalysis()" id="sandbox-btn">Analyze →</button>
+      </div>
+
+      <div class="chips-row">
+        <span style="font-size:0.7rem; color:var(--text-muted); align-self:center;">Quick test:</span>
+        <button class="chip" onclick="fillSandbox('/products.php?id=1%20UNION%20SELECT%20null,username,password%20FROM%20users--')">SQL Injection</button>
+        <button class="chip" onclick="fillSandbox('/comment?msg=%3Cscript%3Ealert(document.cookie)%3C/script%3E')">XSS Payload</button>
+        <button class="chip" onclick="fillSandbox('/static/%2e%2e/%2e%2e/windows/win.ini')">Path Traversal</button>
+        <button class="chip" onclick="fillSandbox('/search?q=union+station')">Union (Benign Trap)</button>
+        <button class="chip" onclick="fillSandbox('/index.html')">Clean GET</button>
+      </div>
+
+      <!-- Result Panel -->
+      <div id="sandbox-result" class="sandbox-result">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid var(--border-dim); padding-bottom:1.25rem; margin-bottom:1.25rem; gap:1rem;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:0.3rem;">Decoded URL</div>
+            <p style="font-size:0.82rem; font-family:var(--font-mono); color:var(--cyan); word-break:break-all;" id="sb-decoded">—</p>
+          </div>
+          <div class="score-display">
+            <div class="score-label">Composite Score</div>
+            <div class="score-number" id="sb-score">—</div>
+            <div class="score-bar-wrap"><div class="score-bar" id="sb-score-bar" style="width:0%;"></div></div>
+          </div>
+        </div>
+
+        <div class="result-grid">
+          <div class="result-card">
+            <div class="result-card-label">Random Forest Attack Prob</div>
+            <div class="result-card-value" id="sb-rf-prob" style="color:var(--rose);">—</div>
+          </div>
+          <div class="result-card">
+            <div class="result-card-label">Isolation Forest Anomaly</div>
+            <div class="result-card-value" id="sb-iso-score" style="color:var(--purple);">—</div>
+          </div>
+          <div class="result-card">
+            <div class="result-card-label">Shannon Entropy H(X)</div>
+            <div class="result-card-value" id="sb-entropy" style="color:var(--cyan);">—</div>
+          </div>
+          <div class="result-card">
+            <div class="result-card-label">Rule Signatures Triggered</div>
+            <div class="result-card-value" id="sb-rules" style="color:var(--amber); font-size:0.9rem;">—</div>
+          </div>
+        </div>
+
+        <!-- Feature bars -->
+        <div style="margin-top:1.5rem;">
+          <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:0.85rem;">Feature Signal Breakdown</div>
+          <div id="sb-feature-bars"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: ENDPOINTS ──────────── -->
+  <section id="tab-hosts" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>💻 Monitored Endpoint Fleet</h3>
+        <button class="action-btn primary" onclick="fetchHosts()">↻ Refresh Fleet</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Host Name</th>
+              <th>Agent ID</th>
+              <th>Status</th>
+              <th>Operating System</th>
+              <th>CPU %</th>
+              <th>RAM Usage</th>
+              <th>Last Heartbeat</th>
+            </tr>
+          </thead>
+          <tbody id="hosts-table-body">
+            <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Loading endpoints…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: EVENT STREAM ──────────── -->
+  <section id="tab-events" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>📜 Live Telemetry Console <span class="head-accent" id="event-count-label">0 events</span></h3>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="action-btn" id="stream-toggle" onclick="toggleStream()">⏸ Pause</button>
+          <button class="action-btn" onclick="clearEventConsole()">Clear</button>
+        </div>
+      </div>
+      <div class="console-box" id="console-stream">
+        <div style="color:var(--text-muted); text-align:center; padding-top:3rem;">Waiting for telemetry events…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: AGENT ACTIVITY ──────────── -->
+  <section id="tab-agent" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>🤖 Agent Activity Log <span class="head-accent">ring-buffer · last 100</span></h3>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <button class="action-btn" onclick="agentActivityLog=[]; renderAgentActivityPanel(); showToast('Log cleared','info');">Clear Log</button>
+        </div>
+      </div>
+      <div class="console-box" id="agent-activity-list" style="height:500px;">
+        <div style="color:var(--text-muted); text-align:center; padding-top:3rem;">
+          No agent activity yet.<br>
+          <code style="color:var(--cyan); margin-top:0.5rem; display:inline-block;">python agent/main.py</code>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: DATASET & BENCHMARKS ──────────── -->
+  <section id="tab-benchmarks" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <h3>📈 10 Lakh (1,000,000) Row Balanced Dataset</h3>
+      </div>
+
+      <!-- Class distribution bars -->
+      <div style="margin-bottom:2rem;">
+        <div style="font-size:0.8rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.07em; margin-bottom:1rem;">Class Distribution · 7-Class Balanced</div>
+        <div id="class-dist-bars">
+          <div class="stat-row"><span class="stat-row-label">benign</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--emerald),var(--teal));"></div></div><span class="stat-row-val">142,858</span></div>
+          <div class="stat-row"><span class="stat-row-label">sqli</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--rose),var(--red));"></div></div><span class="stat-row-val">142,857</span></div>
+          <div class="stat-row"><span class="stat-row-label">traversal</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--amber),#e67e22);"></div></div><span class="stat-row-val">142,857</span></div>
+          <div class="stat-row"><span class="stat-row-label">xss</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--purple),var(--indigo));"></div></div><span class="stat-row-val">142,857</span></div>
+          <div class="stat-row"><span class="stat-row-label">cmdi</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--cyan),var(--blue));"></div></div><span class="stat-row-val">142,857</span></div>
+          <div class="stat-row"><span class="stat-row-label">scan</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,var(--teal),var(--emerald));"></div></div><span class="stat-row-val">142,857</span></div>
+          <div class="stat-row"><span class="stat-row-label">brute</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:100%; background:linear-gradient(90deg,#f97316,var(--amber));"></div></div><span class="stat-row-val">142,857</span></div>
+        </div>
+      </div>
+
+      <div style="overflow-x:auto; margin-bottom:2rem;">
+        <table class="data-table">
+          <thead><tr><th>Class</th><th>Type</th><th>Records</th><th>Balance %</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>benign</code></td><td>Legitimate</td><td>142,858</td><td>14.29%</td><td>Standard browser traffic &amp; false positive query traps</td></tr>
+            <tr><td><code>sqli</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>SQL Injection — UNION SELECT, sleep(), double-encoded</td></tr>
+            <tr><td><code>traversal</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>Directory Traversal — ../../etc/passwd, win.ini</td></tr>
+            <tr><td><code>xss</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>Cross-Site Scripting — &lt;script&gt;, SVG, event handlers</td></tr>
+            <tr><td><code>cmdi</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>OS Command Injection — cat /etc/passwd, whoami</td></tr>
+            <tr><td><code>scan</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>Path Fuzzing &amp; Scanners — .env, wp-login, phpmyadmin</td></tr>
+            <tr><td><code>brute</code></td><td>Attack</td><td>142,857</td><td>14.29%</td><td>Auth Brute Force — rapid 401 bursts</td></tr>
+            <tr class="bench-total"><td>Total</td><td>Balanced</td><td>1,000,000</td><td>100.00%</td><td>data/processed/pipeline_out.parquet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="font-size:0.8rem; color:var(--emerald); font-weight:700; text-transform:uppercase; letter-spacing:0.07em; margin-bottom:1rem;">Model Performance · Evaluated on 200,000 out-of-sample records</div>
+
+      <!-- Model performance bars -->
+      <div style="margin-bottom:1.5rem;">
+        <div style="display:grid; grid-template-columns:200px 1fr; gap:0.5rem 1.5rem; font-size:0.82rem; margin-bottom:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; font-size:0.68rem; letter-spacing:0.07em;">
+          <span>Model</span><span>Accuracy / F1-Score</span>
+        </div>
+        <div style="display:grid; grid-template-columns:200px 1fr; gap:0.75rem 1.5rem; align-items:center;">
+          <span style="font-size:0.82rem; font-weight:700;">Random Forest</span>
+          <div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <div style="flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden;">
+                <div style="width:99.86%; height:100%; background:linear-gradient(90deg,var(--emerald),var(--cyan)); border-radius:99px;"></div>
+              </div>
+              <span style="font-family:var(--font-mono); font-size:0.78rem; color:var(--emerald); min-width:50px;">99.86%</span>
+            </div>
+          </div>
+          <span style="font-size:0.82rem; font-weight:700;">XGBoost</span>
+          <div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <div style="flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden;">
+                <div style="width:99.84%; height:100%; background:linear-gradient(90deg,var(--blue),var(--indigo)); border-radius:99px;"></div>
+              </div>
+              <span style="font-family:var(--font-mono); font-size:0.78rem; color:var(--blue); min-width:50px;">99.84%</span>
+            </div>
+          </div>
+          <span style="font-size:0.82rem; font-weight:700;">Logistic Regression</span>
+          <div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <div style="flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden;">
+                <div style="width:97.54%; height:100%; background:linear-gradient(90deg,var(--amber),#e67e22); border-radius:99px;"></div>
+              </div>
+              <span style="font-family:var(--font-mono); font-size:0.78rem; color:var(--amber); min-width:50px;">97.54%</span>
+            </div>
+          </div>
+          <span style="font-size:0.82rem; font-weight:700;">Isolation Forest</span>
+          <div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <div style="flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden;">
+                <div style="width:39.28%; height:100%; background:linear-gradient(90deg,var(--purple),var(--rose)); border-radius:99px;"></div>
+              </div>
+              <span style="font-family:var(--font-mono); font-size:0.78rem; color:var(--purple); min-width:50px;">39.28%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead><tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1-Score</th><th>ROC-AUC</th><th>PR-AUC</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Random Forest</strong></td><td style="color:var(--emerald)">0.9986</td><td>0.9986</td><td>0.9998</td><td>0.9992</td><td>0.9999</td><td>1.0000</td></tr>
+            <tr><td><strong>XGBoost</strong></td><td style="color:var(--blue)">0.9984</td><td>0.9985</td><td>0.9996</td><td>0.9991</td><td>0.9999</td><td>1.0000</td></tr>
+            <tr><td><strong>Logistic Regression</strong></td><td style="color:var(--amber)">0.9754</td><td>0.9828</td><td>0.9886</td><td>0.9857</td><td>0.9936</td><td>0.9989</td></tr>
+            <tr><td><strong>Isolation Forest (Unsupervised)</strong></td><td style="color:var(--purple)">0.3928</td><td>0.9999</td><td>0.2916</td><td>0.4516</td><td>0.9369</td><td>0.9878</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<footer>
+  SentinelLog &copy; 2026 &nbsp;|&nbsp; GTU Practical Data Science (BE05000231) &nbsp;|&nbsp; Hybrid ML SIEM &amp; Endpoint Threat Detection Platform
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

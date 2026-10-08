@@ -1,0 +1,64 @@
+# SentinelLog Windows Endpoint Detection Signatures
+# Mapped to MITRE ATT&CK Framework
+
+rules:
+  - id: EP-PROC-001
+    name: Office App Spawning Script Interpreter
+    severity: 85
+    mitre: "T1059"
+    description: "Detects Microsoft Office products launching command shells or script interpreters."
+    when:
+      parent_name_in: [winword.exe, excel.exe, powerpnt.exe, outlook.exe]
+      name_in: [powershell.exe, cmd.exe, wscript.exe, cscript.exe, mshta.exe]
+
+  - id: EP-PROC-002
+    name: Encoded PowerShell Command Execution
+    severity: 80
+    mitre: "T1027"
+    description: "Detects PowerShell processes executed with Base64 encoded command arguments."
+    when:
+      name_in: [powershell.exe, pwsh.exe]
+      cmdline_regex: "(?i)\\s-(e|enc|encodedcommand)\\s"
+
+  - id: EP-PROC-003
+    name: Suspicious Process Spawning from Temp / AppData
+    severity: 75
+    mitre: "T1204"
+    description: "Detects process execution originating from temporary directories."
+    when:
+      exe_path_regex: "(?i)(\\\\appdata\\\\local\\\\temp\\\\|\\\\users\\\\public\\\\|\\\\windows\\\\temp\\\\)"
+
+  - id: EP-NET-001
+    name: Outbound Connection to Uncommon / C2 Port
+    severity: 55
+    mitre: "T1571"
+    description: "Detects network sockets connecting to known suspicious or reverse-shell ports."
+    when:
+      remote_port_in: [4444, 1337, 6667, 31337, 8888, 9001]
+
+  - id: EP-AUTH-001
+    name: Burst of Failed Windows Logons
+    severity: 70
+    mitre: "T1110"
+    description: "Detects 5 or more failed login attempts within a 60-second window."
+    when:
+      event: logon_failed
+      count_gte: 5
+      within_seconds: 60
+
+  - id: EP-FILE-001
+    name: Mass File Modification (Ransomware Churn)
+    severity: 90
+    mitre: "T1486"
+    description: "Detects rapid batch file renaming/modifications characteristic of ransomware activity."
+    when:
+      action: file_churn
+
+  - id: EP-PERSIST-001
+    name: New Registry Run Key or Startup Task
+    severity: 80
+    mitre: "T1547"
+    description: "Detects additions to persistence locations pointing to non-standard directories."
+    when:
+      action: persistence_add
+      path_regex: "(?i)(\\\\temp\\\\|\\\\appdata\\\\)"

@@ -1,0 +1,31 @@
+# SentinelLog Endpoint Agent Configuration
+agent_id: "agent-win11-host01"
+hostname: "DESKTOP-LOCAL"
+
+server:
+  api_url: "http://127.0.0.1:8000/ingest/agent"
+  api_key: "sentinel-secret-key-agent"
+  buffer_db: "agent_buffer.db"
+  batch_size: 100
+  flush_interval_seconds: 5
+  max_retries: 5
+
+intervals:
+  processes_seconds: 5
+  network_seconds: 10
+  eventlog_seconds: 15
+  persistence_seconds: 60
+  heartbeat_seconds: 60
+
+file_monitor:
+  enabled: true
+  watch_paths:
+    - "C:\\Users\\Public"
+    - "tests\\fixtures"
+  churn_window_seconds: 10
+  churn_threshold: 40
+
+safety:
+  max_cpu_percent: 2.0
+  max_ram_mb: 100
+  cmdline_char_limit: 500

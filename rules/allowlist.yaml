@@ -1,0 +1,33 @@
+# SentinelLog Noise Filtering & Allowlist Configuration
+
+# Internal IP subnets to exclude from perimeter alerts
+private_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "127.0.0.0/8"
+  - "::1/128"
+
+# Verified search engine crawlers (for Practical 7 noise filtering)
+allowed_crawlers:
+  - name: "Googlebot"
+    ua_regex: "(?i)googlebot"
+  - name: "Bingbot"
+    ua_regex: "(?i)bingbot"
+  - name: "DuckDuckBot"
+    ua_regex: "(?i)duckduckbot"
+
+# Developer / Admin processes that should not trigger false positives on local dev machines
+trusted_processes:
+  - "code.exe"
+  - "python.exe"
+  - "py.exe"
+  - "docker.exe"
+  - "dockerd.exe"
+  - "git.exe"
+  - "devenv.exe"
+  - "pytest.exe"
+
+# Benign search queries or URLs to protect against false positives
+trusted_url_patterns:
+  - "^/search\\?q=union\\+station$"
