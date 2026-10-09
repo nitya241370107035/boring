@@ -34,6 +34,7 @@ function fmtTime(iso) {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
+  initLogLab();
   fetchInitialData();
   startPolling();
   pushActivity("system", "SOC Dashboard online — connected to " + API_BASE);
@@ -49,10 +50,11 @@ function setupTabs() {
       document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
       const el = document.getElementById(`tab-${id}`);
       if (el) el.classList.add("active");
-      if (id === "hosts")      fetchHosts();
-      if (id === "events")     fetchLiveEvents();
-      if (id === "alerts")     fetchAlerts("open");
-      if (id === "agent")      renderActivityPanel();
+      if (id === "loglab")      initLogLab();
+      if (id === "hosts")       fetchHosts();
+      if (id === "events")      fetchLiveEvents();
+      if (id === "alerts")      fetchAlerts("open");
+      if (id === "agent")       renderActivityPanel();
     });
   });
 }
@@ -617,3 +619,669 @@ function esc(str) {
   return String(str).replace(/[&<>'"]/g, t =>
     ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[t] || t));
 }
+
+// ══════════════════════════════════════════════════════════════
+// LOG INGESTION LAB & FORENSIC ANALYZER
+// ══════════════════════════════════════════════════════════════
+
+let _selectedFile = null;
+let _currentLogAnalysis = null;
+let _currentLogFilter = "all";
+let _currentLogSearch = "";
+
+function initLogLab() {
+  setupDropzone();
+}
+
+function setupDropzone() {
+  const dropzone = document.getElementById("log-dropzone");
+  if (!dropzone || dropzone.dataset.initialized) return;
+  dropzone.dataset.initialized = "true";
+
+  ["dragenter", "dragover"].forEach(eventName => {
+    dropzone.addEventListener(eventName, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add("dragover");
+    });
+  });
+
+  ["dragleave", "drop"].forEach(eventName => {
+    dropzone.addEventListener(eventName, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove("dragover");
+    });
+  });
+
+  dropzone.addEventListener("drop", e => {
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      setUploadedFile(files[0]);
+    }
+  });
+}
+
+function handleFileSelected(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) setUploadedFile(file);
+}
+
+function setUploadedFile(file) {
+  _selectedFile = file;
+  const nameEl = document.getElementById("file-display-name");
+  const sizeEl = document.getElementById("file-display-size");
+  const barEl  = document.getElementById("selected-file-info");
+  
+  if (nameEl) nameEl.innerText = file.name;
+  if (sizeEl) sizeEl.innerText = formatFileSize(file.size);
+  if (barEl)  barEl.style.display = "flex";
+  
+  showToast(`File selected: ${file.name} (${formatFileSize(file.size)})`, "info");
+}
+
+function clearSelectedFile() {
+  _selectedFile = null;
+  const input = document.getElementById("log-file-input");
+  if (input) input.value = "";
+  const barEl = document.getElementById("selected-file-info");
+  if (barEl) barEl.style.display = "none";
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+function switchUploadMode(mode) {
+  const fileView = document.getElementById("upload-mode-file");
+  const textView = document.getElementById("upload-mode-text");
+  const fileBtn  = document.getElementById("seg-btn-file");
+  const textBtn  = document.getElementById("seg-btn-text");
+
+  if (mode === "file") {
+    if (fileView) fileView.style.display = "block";
+    if (textView) textView.style.display = "none";
+    if (fileBtn)  fileBtn.classList.add("active");
+    if (textBtn)  textBtn.classList.remove("active");
+  } else {
+    if (fileView) fileView.style.display = "none";
+    if (textView) textView.style.display = "block";
+    if (fileBtn)  fileBtn.classList.remove("active");
+    if (textBtn)  textBtn.classList.add("active");
+  }
+}
+
+async function loadPresetSample(sampleId) {
+  const idMap = {
+    apache_web_attacks: "apache",
+    nginx_production_traffic: "nginx",
+    bruteforce_and_recon: "brute",
+    sample_access: "gtu"
+  };
+  const btn = document.getElementById(`preset-${idMap[sampleId] || "apache"}`);
+  const originalText = btn ? btn.innerHTML : "";
+  if (btn) btn.innerHTML = `<span>⏳</span><span>Analyzing…</span>`;
+
+  showToast(`Processing telemetry preset: ${sampleId}…`, "info");
+  pushActivity("system", `Loading telemetry preset: ${sampleId}`);
+
+  try {
+    const ingestDb = document.getElementById("chk-ingest-db")?.checked || false;
+    const res = await fetch(`${API_BASE}/api/sample-logs/${sampleId}/analyze?ingest_to_db=${ingestDb}`, {
+      method: "POST"
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status === "error") throw new Error(data.message || "Parsing failed");
+
+    renderAnalysisDashboard(data);
+    showToast(`Parsed ${data.parsed_rows} records · ${data.total_attacks} threats identified!`, "success");
+
+    if (ingestDb) {
+      setTimeout(async () => {
+        await fetchMetrics();
+        await fetchAlerts();
+        await fetchLiveEvents();
+      }, 500);
+    }
+  } catch (err) {
+    showToast(`Error analyzing sample: ${err.message}`, "error");
+  } finally {
+    if (btn) btn.innerHTML = originalText;
+  }
+}
+
+async function submitLogAnalysis() {
+  const analyzeBtn = document.getElementById("btn-analyze-log");
+  const originalHtml = analyzeBtn.innerHTML;
+  analyzeBtn.innerHTML = `<span class="spinner-inline"></span> Analyzing…`;
+  analyzeBtn.disabled = true;
+
+  const ingestDb = document.getElementById("chk-ingest-db")?.checked || false;
+  const isFileMode = document.getElementById("upload-mode-file").style.display !== "none";
+
+  try {
+    let res;
+    if (isFileMode) {
+      if (!_selectedFile) {
+        showToast("Please select a log file or click a preset sample above.", "error");
+        analyzeBtn.innerHTML = originalHtml;
+        analyzeBtn.disabled = false;
+        return;
+      }
+      showToast(`Uploading and analyzing ${_selectedFile.name}…`, "info");
+      const formData = new FormData();
+      formData.append("file", _selectedFile);
+      formData.append("ingest_to_db", ingestDb ? "true" : "false");
+
+      res = await fetch(`${API_BASE}/api/upload-log`, {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      const text = document.getElementById("raw-log-textarea").value.trim();
+      if (!text) {
+        showToast("Please paste log lines into the text area.", "error");
+        analyzeBtn.innerHTML = originalHtml;
+        analyzeBtn.disabled = false;
+        return;
+      }
+      showToast("Analyzing pasted log telemetry…", "info");
+      res = await fetch(`${API_BASE}/api/upload-log-raw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: text,
+          filename: "pasted_access.log",
+          ingest_to_db: ingestDb,
+        }),
+      });
+    }
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.detail || `Server returned ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.status === "error") throw new Error(data.message || "Failed to parse log lines");
+
+    renderAnalysisDashboard(data);
+    showToast(`Analysis complete: ${data.parsed_rows} lines parsed, ${data.total_attacks} threats identified!`, "success");
+    pushActivity("event", `Log analysis finished: ${data.parsed_rows} rows, ${data.total_attacks} attacks (${data.detected_format})`);
+
+    if (ingestDb) {
+      setTimeout(async () => {
+        await fetchMetrics();
+        await fetchAlerts();
+        await fetchLiveEvents();
+      }, 600);
+    }
+  } catch (err) {
+    showToast(`Analysis failed: ${err.message}`, "error");
+  } finally {
+    analyzeBtn.innerHTML = originalHtml;
+    analyzeBtn.disabled = false;
+  }
+}
+
+function resetLogUpload() {
+  clearSelectedFile();
+  const textEl = document.getElementById("raw-log-textarea");
+  if (textEl) textEl.value = "";
+  const resPanel = document.getElementById("log-analysis-results");
+  if (resPanel) resPanel.style.display = "none";
+  _currentLogAnalysis = null;
+  showToast("Upload form reset", "info");
+}
+
+function renderAnalysisDashboard(data) {
+  _currentLogAnalysis = data;
+  const panel = document.getElementById("log-analysis-results");
+  if (!panel) return;
+  panel.style.display = "block";
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // 1. KPIs
+  document.getElementById("res-total-lines").innerText = Number(data.total_lines || 0).toLocaleString();
+  document.getElementById("res-success-rate").innerText = `${data.success_rate_percent}% Valid (${data.parsed_rows} Rows)`;
+
+  document.getElementById("res-total-attacks").innerText = Number(data.total_attacks || 0).toLocaleString();
+  document.getElementById("res-attack-rate").innerText = `${data.attack_rate_percent}% Threat Ratio`;
+
+  const peakScore = data.events && data.events.length > 0 ? Math.max(...data.events.map(e => e.score)) : 0;
+  const peakSev = peakScore >= 80 ? "CRITICAL" : peakScore >= 60 ? "HIGH" : peakScore >= 40 ? "MEDIUM" : peakScore >= 20 ? "LOW" : "BENIGN";
+  document.getElementById("res-peak-score").innerText = Math.round(peakScore);
+  document.getElementById("res-max-severity").innerText = `Severity: ${peakSev}`;
+
+  document.getElementById("res-detected-format").innerText = data.detected_format || "Web Access Log";
+  document.getElementById("res-rejected-lines").innerText = `${data.rejected_lines} Rejects / Non-HTTP`;
+
+  document.getElementById("res-throughput").innerText = `${data.throughput_lines_sec.toLocaleString()} /s`;
+  document.getElementById("res-latency").innerText = `${data.elapsed_seconds}s Processing Time`;
+
+  // 2. Threat Vector Breakdown Bars
+  const catContainer = document.getElementById("res-attack-breakdown-bars");
+  if (catContainer) {
+    const cats = data.threat_categories || {};
+    const catKeys = Object.keys(cats);
+    if (catKeys.length === 0) {
+      catContainer.innerHTML = `<div style="color:var(--emerald); padding:1rem; font-size:0.82rem;">✅ 100% Benign — Zero attack signatures detected in log.</div>`;
+    } else {
+      const maxCount = Math.max(...Object.values(cats), 1);
+      const colors = {
+        sqli: "linear-gradient(90deg,var(--rose),var(--red))",
+        xss: "linear-gradient(90deg,var(--purple),var(--indigo))",
+        traversal: "linear-gradient(90deg,var(--amber),#e67e22)",
+        path_traversal: "linear-gradient(90deg,var(--amber),#e67e22)",
+        cmdi: "linear-gradient(90deg,var(--cyan),var(--blue))",
+        scan: "linear-gradient(90deg,var(--teal),var(--emerald))",
+        brute: "linear-gradient(90deg,#f97316,var(--amber))",
+        brute_force: "linear-gradient(90deg,#f97316,var(--amber))",
+        anomaly: "linear-gradient(90deg,var(--indigo),var(--purple))",
+      };
+      catContainer.innerHTML = catKeys.map(k => {
+        const count = cats[k];
+        const pct = Math.min(100, (count / maxCount) * 100).toFixed(1);
+        const grad = colors[k] || "linear-gradient(90deg,var(--blue),var(--cyan))";
+        return `
+        <div class="stat-row">
+          <span class="stat-row-label">${esc(k.toUpperCase())}</span>
+          <div class="stat-bar-track">
+            <div class="stat-bar-fill" style="width:${pct}%; background:${grad};"></div>
+          </div>
+          <span class="stat-row-val" style="color:var(--text-primary); font-weight:700;">${count}</span>
+        </div>`;
+      }).join("");
+    }
+  }
+
+  // 3. HTTP Status Codes Breakdown Bars
+  const stContainer = document.getElementById("res-status-breakdown-bars");
+  if (stContainer) {
+    const statuses = data.status_distribution || {};
+    const stKeys = Object.keys(statuses).sort();
+    if (stKeys.length === 0) {
+      stContainer.innerHTML = `<div style="color:var(--text-muted); padding:1rem; font-size:0.8rem;">No status codes recorded.</div>`;
+    } else {
+      const maxSt = Math.max(...Object.values(statuses), 1);
+      stContainer.innerHTML = stKeys.map(code => {
+        const c = statuses[code];
+        const pct = Math.min(100, (c / maxSt) * 100).toFixed(1);
+        const num = parseInt(code, 10);
+        const color = num < 300 ? "linear-gradient(90deg,var(--emerald),var(--teal))" : num < 400 ? "linear-gradient(90deg,var(--cyan),var(--blue))" : num < 500 ? "linear-gradient(90deg,var(--amber),#e67e22)" : "linear-gradient(90deg,var(--rose),var(--red))";
+        return `
+        <div class="stat-row">
+          <span class="stat-row-label"><span class="st-badge ${num<300?'s2xx':num<400?'s3xx':num<500?'s4xx':'s5xx'}">${code}</span></span>
+          <div class="stat-bar-track">
+            <div class="stat-bar-fill" style="width:${pct}%; background:${color};"></div>
+          </div>
+          <span class="stat-row-val" style="color:var(--text-primary); font-weight:700;">${c}</span>
+        </div>`;
+      }).join("");
+    }
+  }
+
+  // 4. Top Attacker IPs Leaderboard
+  const ipTbody = document.getElementById("res-top-ips-tbody");
+  if (ipTbody) {
+    const ips = data.top_ips || [];
+    if (ips.length === 0) {
+      ipTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:1rem;">No attacker IPs logged.</td></tr>`;
+    } else {
+      ipTbody.innerHTML = ips.map(item => {
+        const isMal = item.attack_count > 0;
+        const tags = item.attack_types && item.attack_types.length > 0 
+          ? item.attack_types.map(t => `<span class="label-pill ${t}">${esc(t)}</span>`).join(" ")
+          : `<span style="color:var(--emerald);font-size:0.72rem;">Clean / Benign</span>`;
+        return `
+        <tr>
+          <td><code style="color:${isMal?'var(--rose)':'var(--cyan)'}; font-weight:700;">${esc(item.ip)}</code></td>
+          <td>${item.total_requests}</td>
+          <td style="color:${isMal?'var(--rose)':'inherit'}; font-weight:700;">${item.attack_count}</td>
+          <td>
+            <span class="badge ${item.max_score>=80?'crit':item.max_score>=60?'high':item.max_score>=40?'med':'ack'}">
+              ${Math.round(item.max_score)} (${item.highest_severity})
+            </span>
+          </td>
+          <td>${tags}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  // 5. Targeted Paths Leaderboard
+  const pathTbody = document.getElementById("res-top-paths-tbody");
+  if (pathTbody) {
+    const paths = data.top_paths || [];
+    if (paths.length === 0) {
+      pathTbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:1rem;">No endpoints recorded.</td></tr>`;
+    } else {
+      pathTbody.innerHTML = paths.map(item => {
+        const isMal = item.attacks > 0;
+        const tags = item.attack_types && item.attack_types.length > 0
+          ? item.attack_types.map(t => `<span class="label-pill ${t}">${esc(t)}</span>`).join(" ")
+          : `<span style="color:var(--text-muted);font-size:0.72rem;">Legitimate</span>`;
+        return `
+        <tr>
+          <td><code style="color:var(--text-primary); font-size:0.75rem;" title="${esc(item.path)}">${esc(item.path.length>40?item.path.slice(0,38)+'...':item.path)}</code></td>
+          <td>${item.hits}</td>
+          <td style="color:${isMal?'var(--rose)':'inherit'}; font-weight:700;">${item.attacks}</td>
+          <td>${tags}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  // 6. Parsed Telemetry Events Table
+  renderLogTable();
+}
+
+function renderLogTable() {
+  if (!_currentLogAnalysis || !_currentLogAnalysis.events) return;
+  const events = _currentLogAnalysis.events;
+  const tbody = document.getElementById("log-events-tbody");
+  const countLabel = document.getElementById("log-table-count");
+
+  let filtered = events.filter(e => {
+    // Label / Severity Filters
+    if (_currentLogFilter === "attacks" && e.label === "benign" && e.score < 60) return false;
+    if (_currentLogFilter === "critical" && e.score < 80) return false;
+    if (_currentLogFilter === "high" && (e.score < 60 || e.score >= 80)) return false;
+    if (_currentLogFilter === "sqli" && e.label !== "sqli") return false;
+    if (_currentLogFilter === "xss" && e.label !== "xss") return false;
+    if (_currentLogFilter === "traversal" && e.label !== "traversal" && e.label !== "path_traversal") return false;
+    if (_currentLogFilter === "errors" && e.status < 400) return false;
+
+    // Search filter
+    if (_currentLogSearch) {
+      const q = _currentLogSearch.toLowerCase();
+      const ip = (e.ip || "").toLowerCase();
+      const meth = (e.method || "").toLowerCase();
+      const url = (e.url || "").toLowerCase();
+      const dec = (e.decoded_url || "").toLowerCase();
+      if (!ip.includes(q) && !meth.includes(q) && !url.includes(q) && !dec.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (countLabel) countLabel.innerText = `Showing ${filtered.length} of ${events.length} events`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:2rem;">No events match current filter.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(e => {
+    const isThreat = e.label !== "benign" || e.score >= 60;
+    const scoreCls = e.score >= 80 ? "crit" : e.score >= 60 ? "high" : e.score >= 40 ? "med" : "ack";
+    const stCode = parseInt(e.status, 10);
+    const stCls = stCode < 300 ? "s2xx" : stCode < 400 ? "s3xx" : stCode < 500 ? "s4xx" : "s5xx";
+
+    const labelHtml = `<span class="label-pill ${e.label}">${esc(e.label)}</span>`;
+    const scoreHtml = `<span class="badge ${scoreCls}" style="font-family:var(--font-mono);">${Math.round(e.score)} / 100</span>`;
+
+    const displayUrl = e.url && e.url.length > 55 ? e.url.slice(0, 52) + "…" : e.url;
+
+    return `
+    <tr style="${isThreat ? 'background:rgba(244,63,94,0.03);' : ''}">
+      <td style="font-family:var(--font-mono); color:var(--text-muted);">${e.id}</td>
+      <td style="font-family:var(--font-mono); font-size:0.73rem; color:var(--text-secondary);">${esc(e.ts.split(' ')[0] || e.ts)}</td>
+      <td><code style="color:${isThreat?'var(--rose)':'var(--cyan)'}; font-weight:600;">${esc(e.ip)}</code></td>
+      <td><strong>${esc(e.method)}</strong></td>
+      <td><code title="${esc(e.url)}" style="color:var(--text-primary); cursor:help;">${esc(displayUrl)}</code></td>
+      <td><span class="st-badge ${stCls}">${e.status}</span></td>
+      <td>${labelHtml}</td>
+      <td>${scoreHtml}</td>
+      <td>
+        <button class="action-btn" style="padding:2px 8px; font-size:0.72rem;" onclick="openInspectorModal(${e.id})">
+          🔍 Inspect
+        </button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function filterLogTable(filterKey) {
+  _currentLogFilter = filterKey;
+  document.querySelectorAll(".filter-pill-btn").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(`ft-${filterKey === "path_traversal" ? "trav" : filterKey}`);
+  if (btn) btn.classList.add("active");
+  renderLogTable();
+}
+
+function handleLogTableSearch(e) {
+  _currentLogSearch = e.target.value.trim();
+  renderLogTable();
+}
+
+function openInspectorModal(eventId) {
+  if (!_currentLogAnalysis || !_currentLogAnalysis.events) return;
+  const evt = _currentLogAnalysis.events.find(x => x.id === eventId);
+  if (!evt) return;
+
+  const modal = document.getElementById("log-inspector-modal");
+  const idEl = document.getElementById("modal-event-id");
+  const titleEl = document.getElementById("modal-title");
+  const bodyEl = document.getElementById("modal-body-content");
+
+  idEl.innerText = `EVENT #${evt.id} · CLIENT: ${evt.ip} · HTTP ${evt.status}`;
+  titleEl.innerText = `${evt.method} ${evt.url}`;
+
+  const isCrit = evt.score >= 80;
+  const isHigh = evt.score >= 60 && evt.score < 80;
+  const sevColor = isCrit ? "var(--rose)" : isHigh ? "var(--amber)" : "var(--emerald)";
+
+  const reasonsList = Array.isArray(evt.reasons) ? evt.reasons : [];
+  const reasonsHtml = reasonsList.length > 0
+    ? reasonsList.map(r => `<span class="reason-tag">⚡ ${esc(r)}</span>`).join(" ")
+    : `<span style="color:var(--text-muted);font-size:0.76rem;">No signature triggers. Clean baseline request.</span>`;
+
+  // Mitigation advice based on attack label
+  const mitigations = {
+    sqli: "Implement Prepared Statements / Parameterized Queries (PDO/ORM). Configure Web Application Firewall (WAF) to drop UNION SELECT and comment tokens. Block client IP if repeating.",
+    xss: "Sanitize & HTML-encode all dynamic query inputs. Enforce a strict Content-Security-Policy (CSP) header. Enable HttpOnly and SameSite flags on sensitive cookies.",
+    traversal: "Sanitize file paths with basename(). Avoid dynamic file inclusions based on user query parameters. Restrict web root directory traversal via web server configuration.",
+    path_traversal: "Sanitize file paths with basename(). Avoid dynamic file inclusions based on user query parameters. Restrict web root directory traversal via web server configuration.",
+    cmdi: "Never pass unsanitized user inputs to system() or exec() calls. Implement strict allowlist validation for administrative parameters.",
+    scan: "Rate-limit client IP at reverse proxy level (Nginx/Cloudflare). Return generic 404s without disclosing server versions or tech stack banners.",
+    brute: "Enforce IP rate limiting and account lockouts after consecutive failed authentication attempts. Require Multi-Factor Authentication (MFA).",
+    brute_force: "Enforce IP rate limiting and account lockouts after consecutive failed authentication attempts. Require Multi-Factor Authentication (MFA).",
+    benign: "No mitigation required. Normal application traffic complying with RFC specifications.",
+  };
+  const advice = mitigations[evt.label] || "Inspect client behavior and review endpoint access logs.";
+
+  bodyEl.innerHTML = `
+    <!-- Top Threat Banner -->
+    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid var(--border-dim); border-radius:12px; padding:1.1rem 1.4rem;">
+      <div>
+        <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">Composite Security Verdict</div>
+        <div style="display:flex; align-items:center; gap:0.6rem; margin-top:0.35rem;">
+          <span class="badge ${evt.score>=80?'crit':evt.score>=60?'high':evt.score>=40?'med':'ack'}" style="font-size:0.95rem; padding:4px 12px;">
+            ${evt.severity}
+          </span>
+          <span class="label-pill ${evt.label}" style="font-size:0.85rem;">${evt.label.toUpperCase()}</span>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em;">Calibrated Threat Score</div>
+        <div style="font-size:2.2rem; font-weight:900; color:${sevColor}; font-family:var(--font-mono); line-height:1.1;">
+          ${Math.round(evt.score)}<span style="font-size:1rem; color:var(--text-muted);">/100</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decoded URL -->
+    <div>
+      <div class="modal-sec-title"><span>🔗</span> Multi-Pass Decoded Target URL</div>
+      <div class="modal-codebox">
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('${esc(evt.decoded_url)}'); showToast('URL copied to clipboard','success');">Copy</button>
+        ${esc(evt.decoded_url)}
+      </div>
+    </div>
+
+    <!-- ML Inference Grid -->
+    <div>
+      <div class="modal-sec-title"><span>🧠</span> Predictive AI Model Signals</div>
+      <div class="result-grid" style="margin-bottom:0.75rem;">
+        <div class="result-card">
+          <div class="result-card-label">Random Forest Attack Prob</div>
+          <div class="result-card-value" style="color:${evt.ml_probability>=0.6?'var(--rose)':'var(--emerald)'};">
+            ${(evt.ml_probability * 100).toFixed(1)}%
+          </div>
+        </div>
+        <div class="result-card">
+          <div class="result-card-label">Isolation Forest Anomaly</div>
+          <div class="result-card-value" style="color:var(--purple);">
+            ${(evt.anomaly_score * 100).toFixed(1)}%
+          </div>
+        </div>
+        <div class="result-card">
+          <div class="result-card-label">Shannon Entropy H(X)</div>
+          <div class="result-card-value" style="color:var(--cyan);">
+            ${evt.features ? evt.features.url_entropy : '—'} bits/char
+          </div>
+        </div>
+        <div class="result-card">
+          <div class="result-card-label">Special Characters</div>
+          <div class="result-card-value" style="color:var(--amber);">
+            ${evt.features ? evt.features.special_chars : '—'} chars
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Forensic Evidence Reasons -->
+    <div>
+      <div class="modal-sec-title"><span>⚡</span> Triggered Rules &amp; Contributing Evidence</div>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        ${reasonsHtml}
+      </div>
+    </div>
+
+    <!-- SOC Remediation Guide -->
+    <div style="background:rgba(6,182,212,0.06); border:1px solid rgba(6,182,212,0.25); border-radius:10px; padding:1rem 1.25rem;">
+      <div style="font-size:0.75rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.07em; margin-bottom:0.35rem;">
+        🛡️ Recommended SOC Mitigation Action
+      </div>
+      <p style="font-size:0.83rem; color:var(--text-primary); margin:0; line-height:1.5;">
+        ${esc(advice)}
+      </p>
+    </div>
+
+    <!-- Raw Entry -->
+    <div>
+      <div class="modal-sec-title"><span>📜</span> Raw Log Telemetry Record</div>
+      <div class="modal-codebox" style="color:var(--text-muted);">
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('${esc(evt.ip)} - - [${esc(evt.ts)}] &quot;${esc(evt.method)} ${esc(evt.url)} HTTP/1.1&quot; ${evt.status} ${evt.bytes} &quot;-&quot; &quot;${esc(evt.ua)}&quot;'); showToast('Raw log copied','success');">Copy</button>
+        ${esc(evt.ip)} - - [${esc(evt.ts)}] "${esc(evt.method)} ${esc(evt.url)} HTTP/1.1" ${evt.status} ${evt.bytes} "-" "${esc(evt.ua)}"
+      </div>
+    </div>
+  `;
+
+  modal.classList.add("open");
+}
+
+function closeInspectorModal(e) {
+  if (e && e.target && e.target.closest && e.target.closest(".modal-card") && !e.target.classList.contains("modal-close")) return;
+  const modal = document.getElementById("log-inspector-modal");
+  if (modal) modal.classList.remove("open");
+}
+
+// Keyboard ESC to close modal
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeInspectorModal();
+});
+
+function exportAnalysisReport(format) {
+  if (!_currentLogAnalysis) {
+    showToast("No analysis available to export", "error");
+    return;
+  }
+
+  if (format === "json") {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(_currentLogAnalysis, null, 2));
+    const dl = document.createElement("a");
+    dl.setAttribute("href", dataStr);
+    dl.setAttribute("download", `SentinelLog_Forensic_Report_${Date.now()}.json`);
+    dl.click();
+    showToast("Downloaded JSON report", "success");
+  } else if (format === "csv") {
+    const events = _currentLogAnalysis.events || [];
+    if (events.length === 0) {
+      showToast("No events to export", "error");
+      return;
+    }
+    const headers = ["id", "timestamp", "ip", "method", "url", "status", "label", "threat_score", "severity", "ml_prob", "anomaly_score"];
+    const rows = events.map(e => [
+      e.id,
+      `"${e.ts}"`,
+      `"${e.ip}"`,
+      `"${e.method}"`,
+      `"${(e.url||'').replace(/"/g, '""')}"`,
+      e.status,
+      `"${e.label}"`,
+      e.score,
+      `"${e.severity}"`,
+      e.ml_probability,
+      e.anomaly_score
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent([headers.join(","), ...rows.map(r => r.join(","))].join("\n"));
+    const dl = document.createElement("a");
+    dl.setAttribute("href", csvContent);
+    dl.setAttribute("download", `SentinelLog_Events_${Date.now()}.csv`);
+    dl.click();
+    showToast("Downloaded CSV log", "success");
+  }
+}
+
+async function pushDetectedAttacksToLiveSOC() {
+  if (!_currentLogAnalysis || !_currentLogAnalysis.events) {
+    showToast("No analysis loaded", "error");
+    return;
+  }
+  const attacks = _currentLogAnalysis.events.filter(e => e.label !== "benign" || e.score >= 60);
+  if (attacks.length === 0) {
+    showToast("No attack threats in this log to push", "info");
+    return;
+  }
+
+  showToast(`Pushing ${attacks.length} threats to live SOC database…`, "info");
+  try {
+    const formatted = attacks.map(a => ({
+      ip: a.ip,
+      method: a.method,
+      url: a.url,
+      raw_url: a.url,
+      decoded_url: a.decoded_url,
+      status: a.status,
+      ua: a.ua || "Mozilla/5.0",
+      rule_ids: a.rule_ids || [],
+      label: a.label,
+    }));
+
+    const res = await fetch(`${API_BASE}/ingest/weblog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
+      body: JSON.stringify({ events: formatted }),
+    });
+
+    if (res.ok) {
+      const d = await res.json();
+      showToast(`Successfully pushed! ${d.new_alerts || 0} new alerts generated in live SIEM!`, "success");
+      pushActivity("alert", `Batch ingest: ${attacks.length} threats pushed to live SOC feed`);
+      setTimeout(async () => {
+        await fetchMetrics();
+        await fetchAlerts("open");
+        await fetchLiveEvents();
+      }, 500);
+    } else throw new Error();
+  } catch {
+    showToast("Failed to push threats to live SOC", "error");
+  }
+}
+

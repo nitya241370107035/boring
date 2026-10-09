@@ -24,6 +24,7 @@
 
   <nav class="nav-links">
     <button class="nav-btn active" data-tab="overview"    id="nav-overview">📊 Overview</button>
+    <button class="nav-btn"        data-tab="loglab"      id="nav-loglab">📂 Log Lab <span class="badge" style="margin-left:4px;font-size:0.60rem;background:linear-gradient(135deg,var(--cyan),var(--blue));color:#04060e;font-weight:800;">LIVE UPLOAD</span></button>
     <button class="nav-btn"        data-tab="alerts"      id="nav-alerts">🚨 Alerts <span id="nav-alert-count" class="badge crit" style="margin-left:4px;font-size:0.62rem;">0</span></button>
     <button class="nav-btn"        data-tab="sandbox"     id="nav-sandbox">🧪 ML Sandbox</button>
     <button class="nav-btn"        data-tab="hosts"       id="nav-hosts">💻 Endpoints</button>
@@ -135,6 +136,279 @@
       <div class="alerts-list" id="overview-alerts-list">
         <div style="padding:2rem; text-align:center; color:var(--text-muted);">Loading alerts from API…</div>
       </div>
+    </div>
+  </section>
+
+  <!-- ──────────── TAB: REAL-WORLD LOG LAB ──────────── -->
+  <section id="tab-loglab" class="tab-content">
+    <div class="glass section-card">
+      <div class="section-head">
+        <div>
+          <h3>📂 Real-World Access Log Ingestion &amp; Threat Intelligence Lab</h3>
+          <p style="color:var(--text-secondary); font-size:0.83rem; margin-top:0.35rem; line-height:1.5;">
+            Ingest live production Apache, Nginx, CSV or Syslog files. Instant feature extraction, signature evaluation, Random Forest classification, and explainable 0–100 threat scoring.
+          </p>
+        </div>
+        <div class="status-badge" style="background:rgba(6,182,212,0.1); border-color:rgba(6,182,212,0.3);">
+          <span style="color:var(--cyan); font-weight:700;">10-STAGE PIPELINE READY</span>
+        </div>
+      </div>
+
+      <!-- Quick Preset Samples -->
+      <div style="margin-bottom:1.25rem;">
+        <div style="font-size:0.72rem; color:var(--cyan); font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.6rem;">
+          ⚡ One-Click Real-World Telemetry Presets
+        </div>
+        <div class="presets-row">
+          <button class="preset-chip" onclick="loadPresetSample('apache_web_attacks')" id="preset-apache">
+            <span>💉</span>
+            <span>Apache Web Attacks (SQLi, XSS, Traversal, Scanners)</span>
+          </button>
+          <button class="preset-chip" onclick="loadPresetSample('nginx_production_traffic')" id="preset-nginx">
+            <span>🛍️</span>
+            <span>Nginx Production Traffic (Legitimate + Exploits)</span>
+          </button>
+          <button class="preset-chip" onclick="loadPresetSample('bruteforce_and_recon')" id="preset-brute">
+            <span>🔑</span>
+            <span>Brute Force &amp; Path Recon (Spraying + Fuzzing)</span>
+          </button>
+          <button class="preset-chip" onclick="loadPresetSample('sample_access')" id="preset-gtu">
+            <span>📋</span>
+            <span>GTU Fixture Baseline (sample_access.log)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Ingestion Mode Selector Tabs -->
+      <div class="segment-tabs">
+        <button class="segment-btn active" id="seg-btn-file" onclick="switchUploadMode('file')">
+          <span>📁</span> Upload Log File
+        </button>
+        <button class="segment-btn" id="seg-btn-text" onclick="switchUploadMode('text')">
+          <span>📝</span> Paste Raw Log Text
+        </button>
+      </div>
+
+      <!-- File Upload Dropzone View -->
+      <div id="upload-mode-file">
+        <div class="dropzone" id="log-dropzone" onclick="document.getElementById('log-file-input').click()">
+          <div class="dropzone-icon">🛡️</div>
+          <div class="dropzone-title">Drag &amp; drop your access log file here, or click to browse</div>
+          <div class="dropzone-sub">
+            Supports Apache Combined/Common, Nginx, W3C, CSV, and JSON Lines formats.
+          </div>
+          <div class="dropzone-badges">
+            <span class="dropzone-badge">.log</span>
+            <span class="dropzone-badge">.txt</span>
+            <span class="dropzone-badge">.csv</span>
+            <span class="dropzone-badge">.json</span>
+            <span class="dropzone-badge">Up to 50 MB</span>
+          </div>
+          <input type="file" id="log-file-input" accept=".log,.txt,.csv,.json" style="display:none;" onchange="handleFileSelected(event)">
+        </div>
+
+        <div id="selected-file-info" class="file-info-bar" style="display:none;">
+          <div class="file-info-left">
+            <div class="file-info-icon">📄</div>
+            <div>
+              <div class="file-info-name" id="file-display-name">access.log</div>
+              <div class="file-info-size" id="file-display-size">0 KB</div>
+            </div>
+          </div>
+          <button class="file-info-remove" onclick="clearSelectedFile()">✕ Remove</button>
+        </div>
+      </div>
+
+      <!-- Raw Text Paste View (Hidden by default) -->
+      <div id="upload-mode-text" style="display:none;">
+        <textarea id="raw-log-textarea" class="raw-log-area" placeholder="# Paste one or more raw Apache / Nginx log lines here...
+198.51.100.7 - - [10/Oct/2026:13:56:12 +0000] &quot;GET /products.php?id=1%20UNION%20SELECT%20null,password%20FROM%20users-- HTTP/1.1&quot; 200 1024 &quot;-&quot; &quot;sqlmap/1.7&quot;
+203.0.113.5 - - [10/Oct/2026:13:56:15 +0000] &quot;GET /index.html HTTP/1.1&quot; 200 2326 &quot;-&quot; &quot;Mozilla/5.0&quot;"></textarea>
+      </div>
+
+      <!-- Execution Options -->
+      <div class="exec-options-bar">
+        <label class="toggle-label" title="When checked, parsed threat events and alerts are automatically stored in the database and appear in the Overview &amp; Alert Triage tabs">
+          <input type="checkbox" id="chk-ingest-db">
+          <span><strong>Ingest to Live SOC SIEM:</strong> Persist events in database &amp; trigger active alerts</span>
+        </label>
+
+        <div style="display:flex; gap:0.75rem; align-items:center;">
+          <button class="action-btn" onclick="resetLogUpload()">Reset</button>
+          <button class="action-btn primary" id="btn-analyze-log" onclick="submitLogAnalysis()" style="padding:0.6rem 1.6rem; font-size:0.85rem; font-weight:700;">
+            🚀 Analyze &amp; Score Log Telemetry
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ──────── Results Dashboard ──────── -->
+    <div id="log-analysis-results" style="display:none; margin-top:1.5rem;">
+
+      <!-- Executive KPI Cards -->
+      <div class="metrics-grid-5">
+        <div class="glass metric-card cyan">
+          <div class="card-stripe"></div>
+          <div class="metric-icon">📑</div>
+          <div class="metric-title">Lines Processed</div>
+          <div class="metric-value cyan-val" id="res-total-lines">0</div>
+          <div class="metric-sub" id="res-success-rate">100% Parsed</div>
+        </div>
+
+        <div class="glass metric-card rose">
+          <div class="card-stripe"></div>
+          <div class="metric-icon">🚨</div>
+          <div class="metric-title">Attacks Detected</div>
+          <div class="metric-value rose-val" id="res-total-attacks">0</div>
+          <div class="metric-sub" id="res-attack-rate">0% Threat Ratio</div>
+        </div>
+
+        <div class="glass metric-card amber">
+          <div class="card-stripe"></div>
+          <div class="metric-icon">⚡</div>
+          <div class="metric-title">Peak Threat Score</div>
+          <div class="metric-value amber-val" id="res-peak-score">0</div>
+          <div class="metric-sub" id="res-max-severity">BENIGN</div>
+        </div>
+
+        <div class="glass metric-card purple">
+          <div class="card-stripe"></div>
+          <div class="metric-icon">🏷️</div>
+          <div class="metric-title">Detected Format</div>
+          <div class="metric-value purple-val" id="res-detected-format" style="font-size:1.15rem; word-break:break-word; margin-top:0.5rem;">—</div>
+          <div class="metric-sub" id="res-rejected-lines">0 Rejects</div>
+        </div>
+
+        <div class="glass metric-card emerald">
+          <div class="card-stripe"></div>
+          <div class="metric-icon">⏱️</div>
+          <div class="metric-title">Engine Throughput</div>
+          <div class="metric-value green-val" id="res-throughput">0/s</div>
+          <div class="metric-sub" id="res-latency">0.00s Elapsed</div>
+        </div>
+      </div>
+
+      <!-- Visual Breakdown Grid -->
+      <div class="insights-grid">
+        <!-- Attack Categories -->
+        <div class="insight-card">
+          <div class="insight-head">
+            <div class="insight-title"><span>🛡️</span> Threat Category Breakdown</div>
+            <span style="font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono);">Class Frequencies</span>
+          </div>
+          <div id="res-attack-breakdown-bars"></div>
+        </div>
+
+        <!-- HTTP Status Codes -->
+        <div class="insight-card">
+          <div class="insight-head">
+            <div class="insight-title"><span>🌐</span> HTTP Status Code Distribution</div>
+            <span style="font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono);">Response Codes</span>
+          </div>
+          <div id="res-status-breakdown-bars"></div>
+        </div>
+      </div>
+
+      <div class="insights-grid">
+        <!-- Top Attacker IPs -->
+        <div class="insight-card">
+          <div class="insight-head">
+            <div class="insight-title"><span>🎯</span> Top Attacker Client IPs</div>
+            <span style="font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono);">Ranked by Threat</span>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="font-size:0.78rem;">
+              <thead>
+                <tr>
+                  <th>IP Address</th>
+                  <th>Hits</th>
+                  <th>Attacks</th>
+                  <th>Threat Score</th>
+                  <th>Attack Signatures</th>
+                </tr>
+              </thead>
+              <tbody id="res-top-ips-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Targeted Paths -->
+        <div class="insight-card">
+          <div class="insight-head">
+            <div class="insight-title"><span>📁</span> Most Targeted Endpoints</div>
+            <span style="font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono);">Vulnerable URIs</span>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="font-size:0.78rem;">
+              <thead>
+                <tr>
+                  <th>Path / Endpoint</th>
+                  <th>Hits</th>
+                  <th>Attacks</th>
+                  <th>Detected Vectors</th>
+                </tr>
+              </thead>
+              <tbody id="res-top-paths-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telemetry Table Card -->
+      <div class="glass section-card" style="margin-top:1.5rem;">
+        <div class="section-head" style="flex-wrap:wrap; gap:1rem;">
+          <div>
+            <h3>📜 Parsed Telemetry Event Stream <span class="head-accent" id="log-table-count">0 events</span></h3>
+            <p style="color:var(--text-secondary); font-size:0.78rem; margin-top:0.2rem;">
+              Click any event to inspect full feature vectors, decoded parameters, and explainable AI reasons.
+            </p>
+          </div>
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button class="action-btn" id="btn-export-json" onclick="exportAnalysisReport('json')">💾 Export JSON</button>
+            <button class="action-btn" id="btn-export-csv" onclick="exportAnalysisReport('csv')">💾 Export CSV</button>
+            <button class="action-btn primary" id="btn-push-alerts" onclick="pushDetectedAttacksToLiveSOC()">📥 Push to SOC Feed</button>
+          </div>
+        </div>
+
+        <!-- Filters Toolbar -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; margin-bottom:1rem; padding-bottom:1rem; border-bottom:1px solid var(--border-dim);">
+          <div class="filter-pills-row">
+            <button class="filter-pill-btn active" onclick="filterLogTable('all')" id="ft-all">All</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('attacks')" id="ft-attacks">🔴 Attacks Only</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('critical')" id="ft-crit">🚨 Critical (≥80)</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('high')" id="ft-high">⚠️ High (≥60)</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('sqli')" id="ft-sqli">💉 SQLi</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('xss')" id="ft-xss">⚡ XSS</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('traversal')" id="ft-trav">📁 Traversal</button>
+            <button class="filter-pill-btn" onclick="filterLogTable('errors')" id="ft-err">❌ 4xx/5xx</button>
+          </div>
+          <input type="text" id="log-table-search" placeholder="🔍 Search IP, method, or URL..." oninput="handleLogTableSearch(event)"
+                 style="background:rgba(6,10,24,0.8); border:1px solid var(--border-dim); color:var(--text-primary); padding:0.4rem 0.85rem; border-radius:8px; font-size:0.78rem; font-family:var(--font-mono); width:240px; outline:none;">
+        </div>
+
+        <!-- Data Table -->
+        <div style="overflow-x:auto; max-height:600px; overflow-y:auto;">
+          <table class="data-table" id="log-events-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Timestamp</th>
+                <th>Client IP</th>
+                <th>Method</th>
+                <th>URL / Path</th>
+                <th>Status</th>
+                <th>Classification</th>
+                <th>Threat Score</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="log-events-tbody">
+              <tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--text-muted);">No log parsed yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -382,6 +656,25 @@
   </section>
 
 </main>
+
+<!-- Forensic Inspector Modal -->
+<div id="log-inspector-modal" class="modal-overlay" onclick="closeInspectorModal(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div style="display:flex; align-items:center; gap:0.75rem;">
+        <span style="font-size:1.3rem;">🔍</span>
+        <div>
+          <h3 style="font-size:1rem; margin:0; color:var(--text-primary);" id="modal-title">Forensic Event Deep-Dive</h3>
+          <span style="font-size:0.72rem; color:var(--cyan); font-family:var(--font-mono);" id="modal-event-id">EVT-001</span>
+        </div>
+      </div>
+      <button class="modal-close" onclick="closeInspectorModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body-content">
+      <!-- Injected via JavaScript -->
+    </div>
+  </div>
+</div>
 
 <!-- Toast Container -->
 <div id="toast-container"></div>

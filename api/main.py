@@ -12,9 +12,9 @@ from typing import Any
 import uuid
 from pathlib import Path
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -419,6 +419,150 @@ def analyze_url_endpoint(payload: dict[str, Any]):
     }
 
 
+
+# ══════════════════════════════════════════════════════════════
+# Real-World Log Ingestion & Analytics Endpoints
+# ══════════════════════════════════════════════════════════════
+from pipeline.log_analyzer import analyze_log_content
+
+SAMPLE_LOGS_MAP: dict[str, dict[str, Any]] = {
+    "apache_web_attacks": {
+        "id": "apache_web_attacks",
+        "name": "Apache Cyber Attacks Sample",
+        "description": "Real-world Apache Combined log with SQLi, XSS, Path Traversal, Scanners & Benign traffic",
+        "path": Path("data/samples/apache_web_attacks.log"),
+    },
+    "nginx_production_traffic": {
+        "id": "nginx_production_traffic",
+        "name": "Nginx Production Traffic Sample",
+        "description": "E-commerce platform access logs with mixed customer requests and sneaky exploits",
+        "path": Path("data/samples/nginx_production_traffic.log"),
+    },
+    "bruteforce_and_recon": {
+        "id": "bruteforce_and_recon",
+        "name": "Brute Force & Reconnaissance Sample",
+        "description": "Credential brute-force bursts against authentication APIs and directory discovery fuzzing",
+        "path": Path("data/samples/bruteforce_and_recon.log"),
+    },
+    "sample_access": {
+        "id": "sample_access",
+        "name": "GTU Lab Baseline Sample",
+        "description": "Complete test fixture log used for GTU Practical 1-10 verification",
+        "path": Path("tests/fixtures/sample_access.log"),
+    },
+}
+
+
+@app.get("/api/sample-logs")
+def list_sample_logs():
+    """Lists available pre-packaged real-world access log samples."""
+    return [
+        {
+            "id": k,
+            "name": v["name"],
+            "description": v["description"],
+            "available": v["path"].exists(),
+        }
+        for k, v in SAMPLE_LOGS_MAP.items()
+    ]
+
+
+@app.get("/api/sample-logs/{sample_id}/raw")
+def get_sample_log_raw(sample_id: str):
+    """Retrieves raw content of a sample log file."""
+    sample = SAMPLE_LOGS_MAP.get(sample_id)
+    if not sample or not sample["path"].exists():
+        raise HTTPException(status_code=404, detail="Sample log not found")
+    return PlainTextResponse(sample["path"].read_text(encoding="utf-8", errors="replace"))
+
+
+@app.post("/api/sample-logs/{sample_id}/analyze")
+def analyze_sample_log(
+    sample_id: str,
+    ingest_to_db: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """Analyzes a pre-packaged sample log directly."""
+    sample = SAMPLE_LOGS_MAP.get(sample_id)
+    if not sample or not sample["path"].exists():
+        raise HTTPException(status_code=404, detail="Sample log not found")
+    content = sample["path"].read_text(encoding="utf-8", errors="replace")
+    result = analyze_log_content(
+        content=content,
+        filename=sample["path"].name,
+        ingest_to_db=ingest_to_db,
+        db=db,
+    )
+    return result
+
+
+@app.post("/api/upload-log")
+async def upload_log_file(
+    file: UploadFile | None = File(None),
+    content: str | None = Form(None),
+    ingest_to_db: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    """
+    Ingests and analyzes a real-world log file (via file upload or raw form text).
+    Extracts features, runs ML models, calculates threat scores, and optionally persists into live SOC.
+    """
+    log_content = ""
+    filename = "uploaded_log.log"
+
+    if file is not None and file.filename:
+        filename = file.filename
+        raw_bytes = await file.read()
+        log_content = raw_bytes.decode("utf-8", errors="replace")
+    elif content is not None:
+        log_content = content
+    else:
+        raise HTTPException(status_code=400, detail="Either 'file' or 'content' must be provided")
+
+    if not log_content.strip():
+        raise HTTPException(status_code=400, detail="Uploaded log file is empty")
+
+    result = analyze_log_content(
+        content=log_content,
+        filename=filename,
+        ingest_to_db=ingest_to_db,
+        db=db,
+    )
+    return result
+
+
+@app.post("/api/upload-log-raw")
+def upload_log_raw(payload: dict[str, Any], db: Session = Depends(get_db)):
+    """JSON API endpoint for uploading and analyzing log content directly."""
+    content = payload.get("content", "")
+    filename = payload.get("filename", "pasted_log.log")
+    ingest_to_db = bool(payload.get("ingest_to_db", False))
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Log content cannot be empty")
+
+    result = analyze_log_content(
+        content=content,
+        filename=filename,
+        ingest_to_db=ingest_to_db,
+        db=db,
+    )
+    return result
+
+
+@app.post("/api/report/markdown")
+def download_markdown_report(payload: dict[str, Any]):
+    """Generates and returns an executive Markdown SOC Incident Audit Report."""
+    from pipeline.log_analyzer import generate_markdown_report
+    md_content = generate_markdown_report(payload)
+    return PlainTextResponse(
+        content=md_content,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f"attachment; filename=SentinelLog_Audit_Report_{int(time.time())}.md"}
+    )
+
+
+
 # Static Web Frontend Mount
 frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 if frontend_dir.exists():
@@ -427,4 +571,5 @@ if frontend_dir.exists():
     @app.get("/", include_in_schema=False)
     def serve_frontend_root():
         return FileResponse(frontend_dir / "index.html")
+
 

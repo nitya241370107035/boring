@@ -36,7 +36,30 @@ def render_eda_page():
         "attack origin clusters, and behavioral feature separations."
     )
 
-    df = load_and_process_data()
+    # Sidebar File Ingestion & Telemetry Source
+    st.sidebar.header("📂 Log Telemetry Source")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Real-World Access Log",
+        type=["log", "txt", "csv", "json"],
+        help="Upload Apache, Nginx, or structured access logs for real-time analysis."
+    )
+
+    if uploaded_file is not None:
+        content = uploaded_file.getvalue().decode("utf-8", errors="replace")
+        from pipeline.log_analyzer import analyze_log_content
+        analysis = analyze_log_content(content, filename=uploaded_file.name)
+        if analysis.get("events"):
+            df = pd.DataFrame(analysis["events"])
+            if "geo_country" not in df.columns:
+                from pipeline.wrangle import enrich_geoip
+                df = enrich_geoip(df)
+            st.sidebar.success(f"Loaded {len(df)} events from {uploaded_file.name} ({analysis.get('detected_format')})")
+        else:
+            st.sidebar.error("No valid events could be parsed from uploaded file.")
+            df = load_and_process_data()
+    else:
+        df = load_and_process_data()
+
     if df.empty:
         st.warning("No log telemetry available for EDA.")
         return
